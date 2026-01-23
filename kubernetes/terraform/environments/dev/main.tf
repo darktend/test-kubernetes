@@ -9,7 +9,7 @@ terraform {
 }
 
 provider "kubernetes" {
-  config_path    = pathexpand("~/.kube/kind-config.yaml")
+  config_path    = pathexpand("~/.kube/config")
   config_context = "kind-kind"
 }
 
@@ -24,58 +24,61 @@ module "namespace" {
   }
 }
 
-module "configmap_red" {
-  source = "../../modules/configmap"
+locals {
+  html_files = {
+    red  = var.red_html_content
+    blue = var.blue_html_content
+  }
 
-  name      = "nginx-red-html"
+  deployments = {
+    red = {
+      name           = "nginx-red"
+      configmap_name = module.configmap["red"].name
+    }
+    blue = {
+      name           = "nginx-blue"
+      configmap_name = module.configmap["blue"].name
+    }
+  }
+}
+
+module "configmap" {
+  source   = "../../modules/configmap"
+  for_each = local.html_files
+
+  name      = "nginx-${each.key}-html"
   namespace = module.namespace.name
 
   data = {
-    "index.html" = var.red_html_content
+    "index.html" = file("${path.module}/${each.value}")
   }
 
   labels = {
-    app         = "nginx-red"
+    app         = "nginx-${each.key}"
     component   = "configuration"
     environment = "dev"
   }
 }
 
-module "configmap_blue" {
-  source = "../../modules/configmap"
+module "deployment" {
+  source   = "../../modules/nginx-deployment"
+  for_each = local.deployments
 
-  name      = "nginx-blue-html"
-  namespace = module.namespace.name
-
-  data = {
-    "index.html" = var.blue_html_content
-  }
-
-  labels = {
-    app         = "nginx-blue"
-    component   = "configuration"
-    environment = "dev"
-  }
-}
-
-module "deployment_red" {
-  source = "../../modules/nginx-deployment"
-
-  name      = "nginx-red"
+  name      = each.value.name
   namespace = module.namespace.name
   replicas  = var.replicas
   image     = var.nginx_image
 
   labels = {
-    app         = "nginx-red"
+    app         = each.value.name
     environment = "dev"
     component   = "web"
   }
 
-  configmap_name = module.configmap_red.name
+  configmap_name = each.value.configmap_name
 
   selector_label_key   = "app"
-  selector_label_value = "nginx-red"
+  selector_label_value = each.value.name
 
   cpu_requests    = "50m"
   memory_requests = "64Mi"
@@ -83,65 +86,20 @@ module "deployment_red" {
   memory_limits   = "128Mi"
 }
 
-module "deployment_blue" {
-  source = "../../modules/nginx-deployment"
+module "service" {
+  source   = "../../modules/service"
+  for_each = local.deployments
 
-  name      = "nginx-blue"
-  namespace = module.namespace.name
-  replicas  = var.replicas
-  image     = var.nginx_image
-
-  labels = {
-    app         = "nginx-blue"
-    environment = "dev"
-    component   = "web"
-  }
-
-  configmap_name = module.configmap_blue.name
-
-  selector_label_key   = "app"
-  selector_label_value = "nginx-blue"
-
-  cpu_requests    = "50m"
-  memory_requests = "64Mi"
-  cpu_limits      = "150m"
-  memory_limits   = "128Mi"
-}
-
-module "service_red" {
-  source = "../../modules/service"
-
-  name      = "nginx-red"
+  name      = each.value.name
   namespace = module.namespace.name
   type      = "ClusterIP"
 
   selector = {
-    app = "nginx-red"
+    app = each.value.name
   }
 
   labels = {
-    app         = "nginx-red"
-    component   = "service"
-    environment = "dev"
-  }
-
-  port        = 80
-  target_port = 80
-}
-
-module "service_blue" {
-  source = "../../modules/service"
-
-  name      = "nginx-blue"
-  namespace = module.namespace.name
-  type      = "ClusterIP"
-
-  selector = {
-    app = "nginx-blue"
-  }
-
-  labels = {
-    app         = "nginx-blue"
+    app         = each.value.name
     component   = "service"
     environment = "dev"
   }
@@ -155,7 +113,7 @@ module "service_load_balancer" {
 
   name      = "nginx-lb"
   namespace = module.namespace.name
-  type      = "ClusterIP"
+  type      = "NodePort"
 
   selector = {
     component = "web"

@@ -9,12 +9,12 @@ output "ingress_url" {
 }
 
 output "red_service_endpoint" {
-  value       = module.service_red.dns_name
+  value       = module.service["red"].dns_name
   description = "Internal DNS for RED service (DEV)"
 }
 
 output "blue_service_endpoint" {
-  value       = module.service_blue.dns_name
+  value       = module.service["blue"].dns_name
   description = "Internal DNS for BLUE service (DEV)"
 }
 
